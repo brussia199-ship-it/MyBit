@@ -56,6 +56,7 @@ USER_AGENTS = [
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
+# Глобальный словарь для хранения сессий пользователей
 user_sessions = {}
 
 class ReportManager:
@@ -142,8 +143,7 @@ report_manager = ReportManager()
 @dp.message(Command('start'))
 async def cmd_start(message: Message):
     welcome_text = """
-⚡ БОТ НАХОДИТСЯ В СТАДИИ РАЗРАБОТКИ
-@uralchikssnoser
+🤖 **Бот для отправки жалоб активирован**
 
 **Команды:**
 /report <username> - начать отправку жалоб
@@ -165,6 +165,7 @@ async def cmd_report(message: Message):
     
     status_msg = await message.reply(f"🚀 Запускаю атаку на @{target}\n📨 Отправляю 50 жалоб...")
     
+    # Сохраняем сессию пользователя
     user_sessions[message.from_user.id] = {
         'target': target,
         'start_time': datetime.now(),
@@ -175,9 +176,11 @@ async def cmd_report(message: Message):
     
     success, failed = await report_manager.flood_reports(target, count=50)
     
-    user_sessions[message.from_user.id]['status'] = 'completed'
-    user_sessions[message.from_user.id]['success'] = success
-    user_sessions[message.from_user.id]['failed'] = failed
+    # Обновляем сессию после завершения
+    if message.from_user.id in user_sessions:
+        user_sessions[message.from_user.id]['status'] = 'completed'
+        user_sessions[message.from_user.id]['success'] = success
+        user_sessions[message.from_user.id]['failed'] = failed
     
     success_rate = (success/(success+failed))*100 if (success+failed) > 0 else 0
     
@@ -197,6 +200,7 @@ async def cmd_report(message: Message):
 async def cmd_status(message: Message):
     user_id = message.from_user.id
     
+    # Проверяем наличие сессии
     if user_id not in user_sessions:
         await message.reply("❌ Нет активных или завершённых сессий.\n\nИспользуйте `/report <username>` чтобы начать.", parse_mode='Markdown')
         return
