@@ -3,7 +3,6 @@ import aiohttp
 import random
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 import string
 from datetime import datetime
@@ -54,7 +53,7 @@ USER_AGENTS = [
 ]
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)  # В v2.x нужно передавать bot в Dispatcher
 
 # Глобальный словарь для хранения сессий пользователей
 user_sessions = {}
@@ -140,7 +139,8 @@ class ReportManager:
 
 report_manager = ReportManager()
 
-@dp.message(Command('start'))
+# Для v2.x используем message_handler вместо Command
+@dp.message_handler(commands=['start'])
 async def cmd_start(message: Message):
     welcome_text = """
 🤖 **Бот для отправки жалоб активирован**
@@ -153,7 +153,7 @@ async def cmd_start(message: Message):
     """
     await message.reply(welcome_text, parse_mode='Markdown')
 
-@dp.message(Command('report'))
+@dp.message_handler(commands=['report'])
 async def cmd_report(message: Message):
     args = message.text.split()
     
@@ -196,7 +196,7 @@ async def cmd_report(message: Message):
     
     await status_msg.edit_text(result_text, parse_mode='Markdown')
 
-@dp.message(Command('status'))
+@dp.message_handler(commands=['status'])
 async def cmd_status(message: Message):
     user_id = message.from_user.id
     
@@ -251,14 +251,14 @@ async def cmd_status(message: Message):
     else:
         await message.reply(status_text_full, parse_mode='Markdown')
 
-@dp.callback_query(lambda c: c.data.startswith('new_'))
+@dp.callback_query_handler(lambda c: c.data.startswith('new_'))
 async def new_attack(callback: CallbackQuery):
     target = callback.data.replace('new_', '')
     await callback.answer("🔄 Запуск новой атаки...")
     await callback.message.answer(f"/report {target}")
     await callback.message.delete()
 
-@dp.callback_query(lambda c: c.data == 'clear')
+@dp.callback_query_handler(lambda c: c.data == 'clear')
 async def clear_session(callback: CallbackQuery):
     user_id = callback.from_user.id
     if user_id in user_sessions:
@@ -266,13 +266,13 @@ async def clear_session(callback: CallbackQuery):
     await callback.answer("✅ История очищена")
     await callback.message.edit_text("✅ История сессий очищена.\n\nИспользуйте `/report` для новой атаки.", parse_mode='Markdown')
 
-@dp.message()
+@dp.message_handler()
 async def handle_message(message: Message):
     await message.reply("❓ Неизвестная команда.\n\nИспользуй `/report <username>` или `/status`", parse_mode='Markdown')
 
 async def main():
     print("🤖 Бот запущен. Нажми Ctrl + C для остановки.")
-    await dp.start_polling(bot)
+    await dp.start_polling()
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
