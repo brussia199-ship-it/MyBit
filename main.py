@@ -143,13 +143,16 @@ report_manager = ReportManager()
 @dp.message_handler(commands=['start'])
 async def cmd_start(message: Message):
     welcome_text = """
-🤖 **Бот для отправки жалоб активирован**
+⚡ БОТ НАХОДИТСЯ В РАЗРАБОТКЕ! 
+⚡ НА ДАННЫЙ МОМЕНТ ОН НЕ РАБОТАЕТ (ЖАЛОБЫ НЕ ИДУТ) 
+⚡ СЛЕДИТЕ ЗА РАЗРАБОТКОЙ В КАНАЛЕ: @uralchikssnoser
 
-**Команды:**
+Команды:
 /report <username> - начать отправку жалоб
 /status - проверить статус
+/info - информация о проекте
 
-**Пример:** `/report username123`
+Пример для отправки жалоб: `/report @username`
     """
     await message.reply(welcome_text, parse_mode='Markdown')
 
