@@ -2,7 +2,8 @@ import asyncio
 import sqlite3
 from datetime import datetime
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.raw.types import LabeledPrice, PreCheckoutQuery
 from pyrogram.enums import ParseMode
 
 # ========== КОНФИГУРАЦИЯ ==========
@@ -66,7 +67,6 @@ def update_user_stats(user_id, stars):
     conn.commit()
     conn.close()
     
-    # Запись покупки
     cursor.execute('''
         INSERT INTO purchases (user_id, stars, gift_id)
         VALUES (?, ?, ?)
@@ -102,7 +102,7 @@ def get_all_users():
     conn.close()
     return users
 
-# ========== ЦЕНА ПОДАРКА (управляется админом) ==========
+# ========== ЦЕНА ПОДАРКА ==========
 current_price = DEFAULT_PRICE
 
 # ========== КОМАНДЫ ПОЛЬЗОВАТЕЛЯ ==========
@@ -276,9 +276,11 @@ async def user_info_cmd(client: Client, message: Message):
         await message.reply("❌ Ошибка ввода")
 
 # ========== ПЛАТЕЖИ ==========
-@app.on_pre_checkout_query()
-async def pre_checkout_handler(client: Client, query: PreCheckoutQuery):
-    await query.answer(ok=True)
+@app.on_raw_update()
+async def handle_pre_checkout(client, update, users, chats):
+    # Обработка pre_checkout
+    if hasattr(update, 'pre_checkout_query_id'):
+        await client.answer_pre_checkout_query(update.pre_checkout_query_id, ok=True)
 
 @app.on_message(filters.successful_payment)
 async def successful_payment_handler(client: Client, message: Message):
