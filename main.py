@@ -1,26 +1,22 @@
 import asyncio
 import sqlite3
+import aiohttp
 from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import LabeledPrice, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ParseMode
-from pyrogram import Client
 
 # ========== КОНФИГУРАЦИЯ ==========
 BOT_TOKEN = "8105002960:AAGF4uFOi8uTRHIhjwLn1ifhtTbZqp26DPk"        # Токен бота от @BotFather
 ADMIN_IDS = [7673683792]                  # Ваш Telegram ID
 
-# Pyrogram (ТОТ ЖЕ БОТ) - он умеет отправлять подарки!
-PYRO_BOT_TOKEN = BOT_TOKEN               # Тот же токен
-
-GIFT_ID = "5025876399963955719"          # ID подарка (мишка)
-DEFAULT_PRICE = 10                       # Цена по умолчанию в Stars
+GIFT_ID = "5170233102089322756"          # ID подарка (мишка)
+DEFAULT_PRICE = 10                       # Цена в Stars (устанавливает админ)
 
 # ========== ИНИЦИАЛИЗАЦИЯ ==========
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-pyro_bot = Client("gift_bot", bot_token=PYRO_BOT_TOKEN)
 
 # ========== БАЗА ДАННЫХ ==========
 def init_db():
@@ -91,24 +87,27 @@ def get_all_users():
     conn.close()
     return users
 
-# ========== ЦЕНА ПОДАРКА ==========
 current_price = DEFAULT_PRICE
 
-# ========== ОТПРАВКА ПОДАРКА ОТ БОТА ЧЕРЕЗ PYROGRAM ==========
-async def send_gift_from_bot(user_id: int, gift_id: str, text: str = "Telegram моя жизнь"):
-    """Отправляет реальный подарок ОТ БОТА!"""
-    try:
-        await pyro_bot.start()
-        result = await pyro_bot.send_gift(
-            chat_id=user_id,
-            gift_id=gift_id,
-            text=text
-        )
-        await pyro_bot.stop()
-        return True, result
-    except Exception as e:
-        print(f"Ошибка отправки подарка: {e}")
-        return False, str(e)
+# ========== ОТПРАВКА РЕАЛЬНОГО ПОДАРКА (ПРЯМОЙ ВЫЗОВ API) ==========
+async def send_gift_via_api(user_id: int, gift_id: str, text: str = "Telegram моя жизнь"):
+    """
+    Отправляет реальный подарок через прямой вызов Bot API.
+    pay_for_upgrade=True - бот оплачивает подарок из своих Stars.
+    Если у бота недостаточно Stars, вызов вернёт ошибку.
+    """
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendGift"
+    payload = {
+        "user_id": user_id,
+        "gift_id": gift_id,
+        "text": text,
+        "pay_for_upgrade": True   # Бот платит Stars за подарок
+    }
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=payload) as resp:
+            result = await resp.json()
+            return result.get("ok", False), result
 
 # ========== КОМАНДЫ ПОЛЬЗОВАТЕЛЯ ==========
 @dp.message(Command("start"))
@@ -118,7 +117,7 @@ async def start_cmd(message: types.Message):
     
     text = (
         "🎁 **Бот подарков Telegram Stars** 🎁\n\n"
-        "Я отправляю **реальные подарки** прямо в профиль!\n\n"
+        "💎 **РЕАЛЬНЫЙ ПОДАРОК В ПРОФИЛЬ!**\n\n"
         f"🐻 **Подарок:** Мишка\n"
         f"📝 **Подпись:** Telegram моя жизнь\n"
         f"⭐ **Цена:** {current_price} Stars\n\n"
@@ -129,8 +128,8 @@ async def start_cmd(message: types.Message):
     )
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Купить подарок", callback_data="buy")],
-        [InlineKeyboardButton(text="👤 Мой профиль", callback_data="profile")]
+        [InlineKeyboardButton(text="🎁 КУПИТЬ ПОДАРОК", callback_data="buy")],
+        [InlineKeyboardButton(text="👤 МОЙ ПРОФИЛЬ", callback_data="profile")]
     ])
     
     await message.answer(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
@@ -140,13 +139,13 @@ async def buy_cmd(message: types.Message):
     user = message.from_user
     add_user(user.id, user.username or "", user.first_name or "")
     
-    prices = [LabeledPrice(label="Подарок Мишка", amount=current_price)]
+    prices = [LabeledPrice(label="🐻 Подарок Мишка", amount=current_price)]
     
     await bot.send_invoice(
         chat_id=user.id,
         title="🐻 Подарок Мишка",
         description=f"Подарок за {current_price} Stars с подписью 'Telegram моя жизнь'",
-        payload=f"gift_{GIFT_ID}",
+        payload="gift_purchase",
         provider_token="",
         currency="XTR",
         prices=prices,
@@ -161,10 +160,10 @@ async def profile_cmd(message: types.Message):
     if stats:
         stars_spent, gifts_received, join_date = stats
         text = (
-            f"👤 **Ваш профиль**\n\n"
-            f"**Имя:** {user.first_name}\n"
-            f"**Username:** @{user.username or 'Нет'}\n"
-            f"**В боте с:** {join_date[:10]}\n\n"
+            f"👤 **ПРОФИЛЬ**\n\n"
+            f"👤 {user.first_name}\n"
+            f"🔖 @{user.username or 'Нет'}\n"
+            f"📅 В боте с: {join_date[:10]}\n\n"
             f"⭐ **Потрачено Stars:** {stars_spent}\n"
             f"🎁 **Получено подарков:** {gifts_received}\n"
         )
@@ -172,46 +171,46 @@ async def profile_cmd(message: types.Message):
         text = "❌ Данные не найдены"
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 Купить ещё", callback_data="buy")]
+        [InlineKeyboardButton(text="🎁 КУПИТЬ", callback_data="buy")]
     ])
     
     await message.answer(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
 
 @dp.message(Command("ping"))
 async def ping_cmd(message: types.Message):
-    await message.answer("🏓 **Pong!** Бот работает отлично!", parse_mode=ParseMode.MARKDOWN)
+    await message.answer("🏓 **PONG!** Бот работает отлично!", parse_mode=ParseMode.MARKDOWN)
 
 # ========== АДМИН КОМАНДЫ ==========
 @dp.message(Command("set_price"))
 async def set_price_cmd(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ У вас нет прав!")
+        await message.answer("⛔ ДОСТУП ЗАПРЕЩЁН!")
         return
     
     global current_price
     try:
         args = message.text.split()
         if len(args) != 2:
-            await message.answer("❌ Используйте: /set_price <количество Stars>")
+            await message.answer("❌ Используйте: `/set_price 15`", parse_mode=ParseMode.MARKDOWN)
             return
         current_price = int(args[1])
-        await message.answer(f"✅ Цена подарка установлена: {current_price} Stars")
+        await message.answer(f"✅ **Цена установлена:** {current_price} Stars", parse_mode=ParseMode.MARKDOWN)
     except ValueError:
-        await message.answer("❌ Введите число")
+        await message.answer("❌ Введите число!", parse_mode=ParseMode.MARKDOWN)
 
 @dp.message(Command("stats"))
 async def stats_cmd(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ У вас нет прав!")
+        await message.answer("⛔ ДОСТУП ЗАПРЕЩЁН!")
         return
     
     total_users, total_stars, total_gifts = get_total_stats()
     
     text = (
-        f"📊 **Статистика бота**\n\n"
-        f"👥 **Всего пользователей:** {total_users}\n"
+        f"📊 **СТАТИСТИКА БОТА**\n\n"
+        f"👥 **Пользователей:** {total_users}\n"
         f"⭐ **Потрачено Stars:** {total_stars}\n"
-        f"🎁 **Отправлено подарков:** {total_gifts}\n"
+        f"🎁 **Куплено подарков:** {total_gifts}\n"
         f"💰 **Текущая цена:** {current_price} Stars\n"
     )
     
@@ -220,44 +219,40 @@ async def stats_cmd(message: types.Message):
 @dp.message(Command("broadcast"))
 async def broadcast_cmd(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ У вас нет прав!")
+        await message.answer("⛔ ДОСТУП ЗАПРЕЩЁН!")
         return
     
     broadcast_text = message.text.replace("/broadcast", "").strip()
     if not broadcast_text:
-        await message.answer("❌ Используйте: /broadcast <текст>")
+        await message.answer("❌ Используйте: `/broadcast Текст`", parse_mode=ParseMode.MARKDOWN)
         return
     
     users = get_all_users()
     success = 0
     fail = 0
     
-    status_msg = await message.answer(f"📨 Начинаю рассылку для {len(users)} пользователей...")
+    status_msg = await message.answer(f"📨 Рассылка для {len(users)} пользователей...")
     
     for user_id, username, first_name in users:
         try:
-            await bot.send_message(
-                user_id,
-                f"📢 **Рассылка от администратора**\n\n{broadcast_text}",
-                parse_mode=ParseMode.MARKDOWN
-            )
+            await bot.send_message(user_id, f"📢 {broadcast_text}", parse_mode=ParseMode.MARKDOWN)
             success += 1
         except:
             fail += 1
         await asyncio.sleep(0.05)
     
-    await status_msg.edit_text(f"✅ Рассылка завершена!\nУспешно: {success}\nОшибок: {fail}")
+    await status_msg.edit_text(f"✅ Рассылка: ✅ {success} | ❌ {fail}")
 
 @dp.message(Command("user"))
 async def user_info_cmd(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
-        await message.answer("⛔ У вас нет прав!")
+        await message.answer("⛔ ДОСТУП ЗАПРЕЩЁН!")
         return
     
     try:
         args = message.text.split()
         if len(args) != 2:
-            await message.answer("❌ Используйте: /user <user_id>")
+            await message.answer("❌ Используйте: `/user 123456789`", parse_mode=ParseMode.MARKDOWN)
             return
         
         user_id = int(args[1])
@@ -266,18 +261,18 @@ async def user_info_cmd(message: types.Message):
         if stats:
             stars_spent, gifts_received, join_date = stats
             text = (
-                f"👤 **Информация о пользователе**\n\n"
-                f"**ID:** `{user_id}`\n"
-                f"**В боте с:** {join_date[:10]}\n"
+                f"👤 **ИНФО О ПОЛЬЗОВАТЕЛЕ**\n\n"
+                f"🆔 **ID:** `{user_id}`\n"
+                f"📅 **В боте с:** {join_date[:10]}\n"
                 f"⭐ **Потрачено Stars:** {stars_spent}\n"
-                f"🎁 **Получено подарков:** {gifts_received}\n"
+                f"🎁 **Подарков получено:** {gifts_received}\n"
             )
         else:
             text = "❌ Пользователь не найден"
         
         await message.answer(text, parse_mode=ParseMode.MARKDOWN)
     except:
-        await message.answer("❌ Ошибка ввода")
+        await message.answer("❌ Ошибка! ID должен быть числом")
 
 # ========== ПЛАТЕЖИ ==========
 @dp.pre_checkout_query()
@@ -289,11 +284,8 @@ async def successful_payment_handler(message: types.Message):
     user = message.from_user
     stars_spent = message.successful_payment.total_amount
     
-    # Отправляем статус "печатает"
-    await bot.send_chat_action(user.id, "typing")
-    
-    # ОТПРАВЛЯЕМ РЕАЛЬНЫЙ ПОДАРОК ОТ БОТА!
-    success, result = await send_gift_from_bot(user.id, GIFT_ID, "Telegram моя жизнь")
+    # Отправляем РЕАЛЬНЫЙ подарок через прямой вызов API
+    success, response = await send_gift_via_api(user.id, GIFT_ID, "Telegram моя жизнь")
     
     if success:
         # Сохраняем в БД
@@ -301,7 +293,7 @@ async def successful_payment_handler(message: types.Message):
         update_user_stats(user.id, stars_spent)
         
         await message.answer(
-            f"✅ **Подарок отправлен!** 🎉\n\n"
+            f"✅ **ПОДАРОК ОТПРАВЛЕН!** 🎉\n\n"
             f"🐻 Мишка с подписью **'Telegram моя жизнь'** уже в вашем профиле!\n"
             f"⭐ Потрачено: {stars_spent} Stars\n\n"
             f"📱 **Как посмотреть подарок?**\n"
@@ -315,49 +307,50 @@ async def successful_payment_handler(message: types.Message):
         for admin_id in ADMIN_IDS:
             await bot.send_message(
                 admin_id,
-                f"💰 **Новая покупка!**\n\n"
-                f"👤 Пользователь: @{user.username or user.first_name} (ID: {user.id})\n"
+                f"💰 **НОВАЯ ПОКУПКА!**\n\n"
+                f"👤 @{user.username or user.first_name} (ID: {user.id})\n"
                 f"⭐ Потрачено Stars: {stars_spent}\n"
-                f"🎁 Подарок: Мишка отправлен ОТ БОТА!\n"
+                f"🎁 Подарок: Мишка отправлен (РЕАЛЬНЫЙ!)\n"
                 f"✅ Статус: Успешно"
             )
     else:
+        error_msg = response.get('description', 'Неизвестная ошибка')
         await message.answer(
-            f"❌ **Ошибка при отправке подарка!**\n\n"
-            f"Администратор уже уведомлён. Ваши Stars будут возвращены в течение 24 часов.\n"
-            f"Ошибка: `{result}`",
+            f"❌ **ОШИБКА ПРИ ОТПРАВКЕ ПОДАРКА**\n\n"
+            f"К сожалению, не удалось отправить подарок.\n"
+            f"Причина: `{error_msg}`\n\n"
+            f"⚠️ Администратор уведомлён. Ваши Stars будут возвращены вручную.",
             parse_mode=ParseMode.MARKDOWN
         )
         
         for admin_id in ADMIN_IDS:
             await bot.send_message(
                 admin_id,
-                f"⚠️ **КРИТИЧЕСКАЯ ОШИБКА!**\n\n"
+                f"⚠️ **КРИТИЧЕСКАЯ ОШИБКА sendGift**\n\n"
                 f"Пользователь: {user.id} (@{user.username})\n"
                 f"Потрачено Stars: {stars_spent}\n"
-                f"Ошибка: {result}\n\n"
-                f"❗ Нужно вернуть Stars вручную!"
+                f"Ошибка: {error_msg}\n\n"
+                f"❗ Нужно вернуть Stars вручную и проверить баланс бота."
             )
 
 # ========== КНОПКИ ==========
 @dp.callback_query(F.data == "buy")
 async def buy_callback(callback: types.CallbackQuery):
-    await callback.answer()
+    await callback.answer("🛒 Оформляем покупку...")
     await buy_cmd(callback.message)
 
 @dp.callback_query(F.data == "profile")
 async def profile_callback(callback: types.CallbackQuery):
-    await callback.answer()
+    await callback.answer("👤 Загружаем профиль...")
     await profile_cmd(callback.message)
 
 # ========== ЗАПУСК ==========
 async def main():
-    print("🚀 Бот подарков запущен!")
-    print(f"🤖 Бот отправляет РЕАЛЬНЫЕ подарки ОТ СЕБЯ!")
-    print(f"💰 Текущая цена: {DEFAULT_PRICE} Stars")
-    print(f"🐻 ID подарка: {GIFT_ID}")
-    
-    # Запускаем aiogram бота
+    print("🚀 БОТ ЗАПУЩЕН!")
+    print(f"🤖 Токен: {BOT_TOKEN[:20]}...")
+    print(f"💰 Текущая цена: {current_price} Stars")
+    print(f"🎁 ID подарка: {GIFT_ID}")
+    print("📡 Метод sendGift будет использован напрямую!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
