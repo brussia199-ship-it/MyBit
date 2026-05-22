@@ -10,12 +10,23 @@ from aiogram.enums import ParseMode
 
 BOT_TOKEN = "8105002960:AAGF4uFOi8uTRHIhjwLn1ifhtTbZqp26DPk"
 ADMIN_IDS = [7673683792]
-GIFT_ID = "5170233102089322756"
-DEFAULT_PRICE = 10
+DEFAULT_PRICE = 15
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 current_price = DEFAULT_PRICE
+
+GIFTS = {
+    "ring": {"id": "5170690322832818290", "name": "💍 Кольцо", "emoji": "💍"},
+    "diamond": {"id": "5170521118301225164", "name": "💎 Алмаз", "emoji": "💎"},
+    "cup": {"id": "5168043875654172773", "name": "🏆 Кубок", "emoji": "🏆"},
+    "tree": {"id": "5922558454332916696", "name": "🎄 Новогодняя ёлка", "emoji": "🎄"},
+    "rocket": {"id": "5170564780938756245", "name": "🚀 Ракета", "emoji": "🚀"},
+    "champagne": {"id": "6028601630662853006", "name": "🍾 Бутылка шампанского", "emoji": "🍾"},
+    "cake": {"id": "5170144170496491616", "name": "🎂 Праздничный торт", "emoji": "🎂"},
+    "heart": {"id": "5170145012310081615", "name": "💝 Сердце с лентой", "emoji": "💝"},
+    "bear": {"id": "5956217000635139069", "name": "🧸 Плюшевый мишка в шапке Санты", "emoji": "🧸"}
+}
 
 def init_db():
     conn = sqlite3.connect('gift_bot.db')
@@ -50,6 +61,8 @@ def init_db():
             user_id INTEGER,
             stars INTEGER,
             gift_id TEXT,
+            gift_name TEXT,
+            comment TEXT,
             purchase_date TEXT DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -110,6 +123,16 @@ def add_donation(user_id, amount, message=""):
     conn.commit()
     conn.close()
     update_donation_stats(user_id, amount)
+
+def add_purchase(user_id, stars, gift_id, gift_name, comment=""):
+    conn = sqlite3.connect('gift_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO purchases (user_id, stars, gift_id, gift_name, comment)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (user_id, stars, gift_id, gift_name, comment))
+    conn.commit()
+    conn.close()
 
 def get_top_donors(limit=10):
     conn = sqlite3.connect('gift_bot.db')
@@ -215,13 +238,16 @@ def activate_check(code: str, user_id: int):
     conn.close()
     return True, gifts_count, f"✅ Активирован! Получено {gifts_count} подарков"
 
-async def send_gift_via_api(user_id: int, gift_id: str, text: str = "Telegram моя жизнь"):
+async def send_gift_via_api(user_id: int, gift_id: str, text: str = None, bot_username: str = None):
+    if text is None:
+        text = f"Подарок от @{bot_username}" if bot_username else "Подарок"
+    
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendGift"
     payload = {
         "user_id": user_id,
         "gift_id": gift_id,
         "text": text,
-        "pay_for_upgrade": False
+        "pay_for_upgrade": True
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as resp:
@@ -237,15 +263,29 @@ async def get_bot_stars_balance():
                 return result.get("result", {}).get("total_stars", 0)
             return 0
 
+def get_gifts_keyboard():
+    keyboard = []
+    row = []
+    for i, (key, gift) in enumerate(GIFTS.items(), 1):
+        row.append(InlineKeyboardButton(text=gift["emoji"], callback_data=f"gift_{key}"))
+        if i % 3 == 0:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton(text="💝 ПОДДЕРЖАТЬ", callback_data="donate_menu")])
+    keyboard.append([InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_main")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 КУПИТЬ ПОДАРОК", callback_data="buy")],
-        [InlineKeyboardButton(text="👤 МОЙ ПРОФИЛЬ", callback_data="profile")],
-        [InlineKeyboardButton(text="📦 МОИ ПОДАРКИ", callback_data="balance")],
-        [InlineKeyboardButton(text="💝 ПОДДЕРЖАТЬ", callback_data="donate_menu")],
-        [InlineKeyboardButton(text="🏆 ТОП ДОНАТЕРОВ", callback_data="top_donors")],
-        [InlineKeyboardButton(text="⚡ АКТИВИРОВАТЬ ЧЕК", callback_data="activate_menu")],
-        [InlineKeyboardButton(text="💰 БАЛАНС БОТА", callback_data="bot_balance")]
+        [InlineKeyboardButton(text="🎁 ◈ КУПИТЬ ПОДАРОК", callback_data="gifts_menu")],
+        [InlineKeyboardButton(text="👤 ◈ МОЙ ПРОФИЛЬ", callback_data="profile")],
+        [InlineKeyboardButton(text="📦 ◈ МОИ ПОДАРКИ", callback_data="balance")],
+        [InlineKeyboardButton(text="💝 ◈ ПОДДЕРЖАТЬ", callback_data="donate_menu")],
+        [InlineKeyboardButton(text="🏆 ◈ ТОП ДОНАТЕРОВ", callback_data="top_donors")],
+        [InlineKeyboardButton(text="⚡ ◈ АКТИВИРОВАТЬ ЧЕК", callback_data="activate_menu")],
+        [InlineKeyboardButton(text="💰 ◈ БАЛАНС БОТА", callback_data="bot_balance")]
     ])
 
 def get_donate_keyboard():
@@ -269,30 +309,153 @@ def get_admin_keyboard():
         [InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_main")]
     ])
 
+def get_comment_keyboard(gift_key: str, gift_name: str):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 ДОБАВИТЬ КОММЕНТАРИЙ (+3⭐)", callback_data=f"comment_{gift_key}")],
+        [InlineKeyboardButton(text="⏩ БЕЗ КОММЕНТАРИЯ", callback_data=f"no_comment_{gift_key}")],
+        [InlineKeyboardButton(text="◀️ НАЗАД", callback_data="gifts_menu")]
+    ])
+
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
     user = message.from_user
     add_user(user.id, user.username or "", user.first_name or "")
     
     text = (
-        "🐻 **ПОДАРКИ ЗА TELEGRAM STARS** 🎁\n\n"
-        "Добро пожаловать в бота, где можно купить реальные подарки для профиля Telegram!\n\n"
-        f"⭐ **Подарок:** Мишка с подписью «Telegram моя жизнь»\n"
-        f"💰 **Цена:** `{current_price} Stars`\n\n"
-        "📌 **Управляйте всем через кнопки ниже**\n\n"
-        "💝 **Поддержите проект** — ваши донаты помогут развитию бота!"
+        "✨ **ПОДАРКИ ЗА TELEGRAM STARS** ✨\n\n"
+        "Добро пожаловать в магазин реальных подарков для профиля Telegram!\n\n"
+        f"💰 **Стоимость подарка:** `{current_price} Stars`\n"
+        "💬 **Комментарий к подарку:**\n"
+        f"   • Без комментария: @{user.username or user.first_name}\n"
+        f"   • С комментарием: +3 Stars\n\n"
+        "🎁 **Выберите подарок в меню ниже**\n"
+        "👤 **Подарки отправляются от имени Павла Дурова**"
     )
     
     await message.answer(text, reply_markup=get_main_keyboard(), parse_mode=ParseMode.MARKDOWN)
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery):
+    user = callback.from_user
     await callback.message.edit_text(
-        "🐻 **ГЛАВНОЕ МЕНЮ**\n\nВыберите действие:",
+        f"✨ **ГЛАВНОЕ МЕНЮ**\n\n"
+        f"💰 Цена подарка: {current_price} Stars\n"
+        f"👤 Подарки от @{user.username or user.first_name}",
         reply_markup=get_main_keyboard(),
         parse_mode=ParseMode.MARKDOWN
     )
     await callback.answer()
+
+@dp.callback_query(F.data == "gifts_menu")
+async def gifts_menu(callback: types.CallbackQuery):
+    text = "🎁 **ВЫБЕРИТЕ ПОДАРОК**\n\n"
+    for key, gift in GIFTS.items():
+        text += f"{gift['emoji']} {gift['name']}\n"
+    text += f"\n💰 Цена: {current_price} Stars\n💬 Комментарий: +3 Stars"
+    
+    await callback.message.edit_text(text, reply_markup=get_gifts_keyboard(), parse_mode=ParseMode.MARKDOWN)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("gift_"))
+async def select_gift(callback: types.CallbackQuery):
+    gift_key = callback.data.replace("gift_", "")
+    gift = GIFTS.get(gift_key)
+    
+    if not gift:
+        await callback.answer("Подарок не найден")
+        return
+    
+    text = (
+        f"{gift['emoji']} **{gift['name']}**\n\n"
+        f"💰 **Цена:** {current_price} Stars\n"
+        f"💬 **Комментарий:**\n"
+        f"   • Без комментария — @{callback.from_user.username or callback.from_user.first_name}\n"
+        f"   • С комментарием — +3 Stars ({current_price + 3} Stars)\n\n"
+        f"Выберите вариант:"
+    )
+    
+    await callback.message.edit_text(text, reply_markup=get_comment_keyboard(gift_key, gift['name']), parse_mode=ParseMode.MARKDOWN)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("comment_"))
+async def with_comment(callback: types.CallbackQuery):
+    gift_key = callback.data.replace("comment_", "")
+    gift = GIFTS.get(gift_key)
+    user = callback.from_user
+    
+    if not gift:
+        await callback.answer("Подарок не найден")
+        return
+    
+    await callback.message.edit_text(
+        f"📝 **ВВЕДИТЕ КОММЕНТАРИЙ**\n\n"
+        f"Подарок: {gift['emoji']} {gift['name']}\n"
+        f"💰 Цена с комментарием: {current_price + 3} Stars\n\n"
+        f"Отправьте текстовое сообщение — это будет подпись к подарку.\n"
+        f"Максимум 100 символов."
+    )
+    
+    async with dp.fsm.storage:
+        await dp.fsm.storage.set_state(user.id, "waiting_comment")
+        await dp.fsm.storage.set_data(user.id, {"gift_key": gift_key})
+    
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("no_comment_"))
+async def without_comment(callback: types.CallbackQuery):
+    gift_key = callback.data.replace("no_comment_", "")
+    gift = GIFTS.get(gift_key)
+    user = callback.from_user
+    bot_info = await bot.get_me()
+    
+    if not gift:
+        await callback.answer("Подарок не найден")
+        return
+    
+    comment = f"Подарок от @{user.username or user.first_name}"
+    
+    prices = [LabeledPrice(label=f"{gift['emoji']} {gift['name']}", amount=current_price)]
+    
+    await bot.send_invoice(
+        chat_id=user.id,
+        title=f"{gift['emoji']} {gift['name']}",
+        description=f"Подарок без комментария. Подпись: {comment}",
+        payload=f"gift_{gift_key}_no_comment",
+        provider_token="",
+        currency="XTR",
+        prices=prices,
+        start_parameter="gift_purchase"
+    )
+    await callback.answer()
+
+@dp.message()
+async def handle_comment_input(message: types.Message):
+    user = message.from_user
+    
+    async with dp.fsm.storage:
+        state = await dp.fsm.storage.get_state(user.id)
+        
+        if state == "waiting_comment":
+            comment = message.text[:100]
+            data = await dp.fsm.storage.get_data(user.id)
+            gift_key = data.get("gift_key")
+            gift = GIFTS.get(gift_key)
+            
+            await dp.fsm.storage.set_state(user.id, None)
+            
+            if gift:
+                prices = [LabeledPrice(label=f"{gift['emoji']} {gift['name']} + комментарий", amount=current_price + 3)]
+                
+                await bot.send_invoice(
+                    chat_id=user.id,
+                    title=f"{gift['emoji']} {gift['name']}",
+                    description=f"Подарок с комментарием: {comment}",
+                    payload=f"gift_{gift_key}_comment_{comment}",
+                    provider_token="",
+                    currency="XTR",
+                    prices=prices,
+                    start_parameter="gift_purchase"
+                )
 
 @dp.callback_query(F.data == "donate_menu")
 async def donate_menu(callback: types.CallbackQuery):
@@ -300,10 +463,10 @@ async def donate_menu(callback: types.CallbackQuery):
         "💝 **ПОДДЕРЖАТЬ ПРОЕКТ**\n\n"
         "Выберите сумму доната:\n\n"
         "⭐ 1 Star = поддержка\n"
-        "⭐ 10+ Stars = благодарность в профиле\n"
-        "⭐ 50+ Stars = именная благодарность\n"
+        "⭐ 10+ Stars = благодарность\n"
+        "⭐ 50+ Stars = именная запись\n"
         "⭐ 100+ Stars = VIP статус\n\n"
-        "Все донаты идут на развитие бота и отправку подарков!",
+        "Все донаты идут на развитие бота!",
         reply_markup=get_donate_keyboard(),
         parse_mode=ParseMode.MARKDOWN
     )
@@ -320,8 +483,8 @@ async def donate_callback(callback: types.CallbackQuery):
     
     await bot.send_invoice(
         chat_id=user.id,
-        title="💝 Поддержка проекта",
-        description=f"Спасибо за поддержку! Ваш донат в размере {amount} Stars поможет развитию бота.",
+        title="💝 Поддержка",
+        description=f"Спасибо за поддержку! {amount} Stars помогут развитию.",
         payload=f"donate_{amount}",
         provider_token="",
         currency="XTR",
@@ -349,25 +512,6 @@ async def top_donors_callback(callback: types.CallbackQuery):
     ])
     
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query(F.data == "buy")
-async def buy_callback(callback: types.CallbackQuery):
-    user = callback.from_user
-    add_user(user.id, user.username or "", user.first_name or "")
-    
-    prices = [LabeledPrice(label="🐻 Подарок Мишка", amount=current_price)]
-    
-    await bot.send_invoice(
-        chat_id=user.id,
-        title="🐻 Подарок Мишка",
-        description=f"Подарок за {current_price} Stars с подписью «Telegram моя жизнь»",
-        payload="gift_purchase",
-        provider_token="",
-        currency="XTR",
-        prices=prices,
-        start_parameter="gift_purchase"
-    )
     await callback.answer()
 
 @dp.callback_query(F.data == "profile")
@@ -411,7 +555,7 @@ async def bot_balance_callback(callback: types.CallbackQuery):
     balance = await get_bot_stars_balance()
     await callback.message.edit_text(
         f"💰 **БАЛАНС БОТА:** {balance} Stars\n\n"
-        f"💡 Эти Stars используются для отправки подарков пользователям.\n\n"
+        f"💡 Эти Stars используются для отправки подарков.\n"
         f"💝 Вы можете пополнить баланс бота через донат!",
         reply_markup=get_main_keyboard(),
         parse_mode=ParseMode.MARKDOWN
@@ -469,7 +613,7 @@ async def send_gift_cmd(message: types.Message):
     conn.commit()
     conn.close()
     
-    await message.answer(f"✅ Подарок отправлен пользователю {target}!\n🐻 Мишка уже у друга!")
+    await message.answer(f"✅ Подарок отправлен пользователю {target}!")
 
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
@@ -739,9 +883,8 @@ async def successful_payment_handler(message: types.Message):
             await message.answer(
                 f"💝 **СПАСИБО ЗА ЩЕДРЫЙ ДОНАТ!**\n\n"
                 f"Вы пожертвовали {amount} Stars!\n"
-                f"Вы получаете VIP статус и именную благодарность в боте!\n\n"
-                f"🏆 Вы в ТОПе донатеров!\n\n"
-                f"🌟 Ваша поддержка помогает боту развиваться!",
+                f"Вы получаете VIP статус!\n\n"
+                f"🏆 Вы в ТОПе донатеров!",
                 reply_markup=get_main_keyboard(),
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -749,65 +892,70 @@ async def successful_payment_handler(message: types.Message):
             await message.answer(
                 f"💝 **СПАСИБО ЗА ПОДДЕРЖКУ!**\n\n"
                 f"Вы пожертвовали {amount} Stars!\n"
-                f"🌟 Ваша помощь помогает боту отправлять подарки!\n\n"
-                f"Спасибо, что с нами!",
+                f"🌟 Ваша помощь помогает боту развиваться!",
                 reply_markup=get_main_keyboard(),
                 parse_mode=ParseMode.MARKDOWN
             )
         
         for admin_id in ADMIN_IDS:
-            await bot.send_message(
-                admin_id,
-                f"💝 Новый донат!\n👤 @{user.username or user.first_name}\n⭐ {amount} Stars"
-            )
+            await bot.send_message(admin_id, f"💝 Донат: @{user.username or user.first_name} | {amount} ⭐")
     
-    else:
-        success, response = await send_gift_via_api(user.id, GIFT_ID, "Telegram моя жизнь")
+    elif payload.startswith("gift"):
+        parts = payload.split("_")
+        gift_key = parts[1]
+        gift = GIFTS.get(gift_key)
         
-        if success:
-            add_user(user.id, user.username or "", user.first_name or "")
-            update_user_stats(user.id, stars_spent)
+        if gift:
+            bot_info = await bot.get_me()
             
-            await message.answer(
-                f"✅ **ПОДАРОК ОТПРАВЛЕН!** 🎉\n\n"
-                f"🐻 Мишка уже в вашем профиле!\n"
-                f"⭐ Потрачено: {stars_spent} Stars\n\n"
-                f"📱 Настройки → Подарки",
-                reply_markup=get_main_keyboard(),
-                parse_mode=ParseMode.MARKDOWN
-            )
+            if "no_comment" in payload:
+                comment = f"Подарок от @{user.username or user.first_name}"
+            else:
+                comment = payload.split("_comment_")[1] if "_comment_" in payload else f"Подарок от @{bot_info.username}"
             
-            for admin_id in ADMIN_IDS:
-                await bot.send_message(admin_id, f"💰 Покупка: @{user.username or user.first_name} | {stars_spent} Stars")
-        else:
-            error = response.get('description', 'Unknown error')
+            success, response = await send_gift_via_api(user.id, gift["id"], comment, bot_info.username)
             
-            add_user(user.id, user.username or "", user.first_name or "")
-            add_gift_balance(user.id, 1)
-            
-            await message.answer(
-                f"✅ **ПОДАРОК ДОБАВЛЕН В БАЛАНС!** 📦\n\n"
-                f"У бота временно нет Stars, но подарок сохранён в ваш баланс.\n"
-                f"Вы можете использовать его командой `/send_gift @username`\n\n"
-                f"⭐ Потрачено: {stars_spent} Stars",
-                reply_markup=get_main_keyboard(),
-                parse_mode=ParseMode.MARKDOWN
-            )
-            
-            for admin_id in ADMIN_IDS:
-                await bot.send_message(
-                    admin_id,
-                    f"⚠️ Ошибка sendGift, но подарок в балансе!\n"
-                    f"Пользователь: {user.id} (@{user.username})\n"
-                    f"Stars: {stars_spent}\n"
-                    f"Ошибка: {error}"
+            if success:
+                add_user(user.id, user.username or "", user.first_name or "")
+                update_user_stats(user.id, stars_spent)
+                add_purchase(user.id, stars_spent, gift["id"], gift["name"], comment)
+                
+                await message.answer(
+                    f"✅ **ПОДАРОК ОТПРАВЛЕН!** 🎉\n\n"
+                    f"{gift['emoji']} **{gift['name']}**\n"
+                    f"💬 Комментарий: {comment}\n"
+                    f"⭐ Потрачено: {stars_spent} Stars\n\n"
+                    f"📱 Подарок уже в вашем профиле!",
+                    reply_markup=get_main_keyboard(),
+                    parse_mode=ParseMode.MARKDOWN
                 )
+                
+                for admin_id in ADMIN_IDS:
+                    await bot.send_message(admin_id, f"💰 Покупка: @{user.username or user.first_name} | {gift['name']} | {stars_spent} ⭐")
+            else:
+                error = response.get('description', 'Unknown error')
+                add_user(user.id, user.username or "", user.first_name or "")
+                add_gift_balance(user.id, 1)
+                
+                await message.answer(
+                    f"✅ **ПОДАРОК ДОБАВЛЕН В БАЛАНС!** 📦\n\n"
+                    f"{gift['emoji']} {gift['name']}\n"
+                    f"У бота временно нет Stars, но подарок сохранён.\n"
+                    f"Используйте `/send_gift @username`\n\n"
+                    f"⭐ Потрачено: {stars_spent} Stars",
+                    reply_markup=get_main_keyboard(),
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                
+                for admin_id in ADMIN_IDS:
+                    await bot.send_message(admin_id, f"⚠️ Ошибка: {error}\nПользователь: {user.id} | {stars_spent} ⭐")
 
 async def main():
     balance = await get_bot_stars_balance()
     print("🚀 БОТ ЗАПУЩЕН!")
     print(f"💰 Баланс бота: {balance} Stars")
     print(f"🎁 Цена подарка: {current_price} Stars")
+    print(f"🎀 Доступно подарков: {len(GIFTS)}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
