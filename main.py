@@ -213,7 +213,7 @@ def activate_check(code: str, user_id: int):
 
 async def send_gift_via_api(user_id: int, gift_id: str, text: str):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendGift"
-    payload = {"user_id": user_id, "gift_id": gift_id, "text": text, "pay_for_upgrade": True}
+    payload = {"user_id": user_id, "gift_id": gift_id, "text": text, "pay_for_upgrade": False}
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as resp:
             result = await resp.json()
