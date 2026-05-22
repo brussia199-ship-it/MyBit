@@ -16,8 +16,8 @@ dp = Dispatcher()
 
 GIFT_ID = "5170145012310081615"
 GIFT_NAME = "🧸 Плюшевый мишка"
-GIFT_EMOJI = "🧸"
-current_price = 5
+DEFAULT_COMMENT = "@DuDRovEGift залетай в нашу банду"
+current_price = 15
 
 def init_db():
     conn = sqlite3.connect('gift_bot.db')
@@ -269,9 +269,8 @@ async def start_cmd(message: types.Message):
         f"Добро пожаловать!\n\n"
         f"🎁 **Подарок:** {GIFT_NAME}\n"
         f"💰 **Цена:** {current_price} Stars\n\n"
-        f"💬 **Комментарий:**\n"
-        f"   • Без комментария: @{user.username or user.first_name}\n"
-        f"   • С комментарием: +3 Stars\n\n"
+        f"💬 **Комментарий к подарку:**\n"
+        f"`{DEFAULT_COMMENT}`\n\n"
         f"📌 Управляйте через кнопки ниже"
     )
     
@@ -279,7 +278,6 @@ async def start_cmd(message: types.Message):
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery):
-    user = callback.from_user
     text = "🧸 **ГЛАВНОЕ МЕНЮ**\n\nВыберите действие:"
     await callback.message.edit_text(text, reply_markup=get_main_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
@@ -289,82 +287,21 @@ async def buy_callback(callback: types.CallbackQuery):
     user = callback.from_user
     add_user(user.id, user.username or "", user.first_name or "")
     
-    text = (
-        f"🧸 **{GIFT_NAME}**\n\n"
-        f"💰 **Цена:** {current_price} Stars\n"
-        f"💬 **Комментарий:**\n"
-        f"   • Без комментария — @{user.username or user.first_name}\n"
-        f"   • С комментарием — +3 Stars ({current_price + 3} Stars)\n\n"
-        f"Выберите вариант:"
-    )
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📝 ДОБАВИТЬ КОММЕНТАРИЙ (+3⭐)", callback_data="comment")],
-        [InlineKeyboardButton(text="⏩ БЕЗ КОММЕНТАРИЯ", callback_data="no_comment")],
-        [InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_main")]
-    ])
-    
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query(F.data == "comment")
-async def with_comment(callback: types.CallbackQuery):
-    user = callback.from_user
-    
-    await callback.message.edit_text(
-        f"📝 **ВВЕДИТЕ КОММЕНТАРИЙ**\n\n"
-        f"🧸 Подарок: {GIFT_NAME}\n"
-        f"💰 Цена с комментарием: {current_price + 3} Stars\n\n"
-        f"Отправьте текстовое сообщение (до 100 символов)"
-    )
-    
-    async with dp.fsm.storage:
-        await dp.fsm.storage.set_state(user.id, "waiting_comment")
-    
-    await callback.answer()
-
-@dp.callback_query(F.data == "no_comment")
-async def without_comment(callback: types.CallbackQuery):
-    user = callback.from_user
-    comment = f"Подарок от @{user.username or user.first_name}"
+    comment = DEFAULT_COMMENT
     
     prices = [LabeledPrice(label=GIFT_NAME, amount=current_price)]
     
     await bot.send_invoice(
         chat_id=user.id,
         title=GIFT_NAME,
-        description=f"Подарок без комментария. Подпись: {comment}",
-        payload="gift_no_comment",
+        description=f"Подарок с комментарием: {comment}",
+        payload="gift_purchase",
         provider_token="",
         currency="XTR",
         prices=prices,
         start_parameter="gift_purchase"
     )
     await callback.answer()
-
-@dp.message()
-async def handle_comment_input(message: types.Message):
-    user = message.from_user
-    
-    async with dp.fsm.storage:
-        state = await dp.fsm.storage.get_state(user.id)
-        
-        if state == "waiting_comment":
-            comment = message.text[:100]
-            await dp.fsm.storage.set_state(user.id, None)
-            
-            prices = [LabeledPrice(label=f"{GIFT_NAME} + комментарий", amount=current_price + 3)]
-            
-            await bot.send_invoice(
-                chat_id=user.id,
-                title=GIFT_NAME,
-                description=f"Подарок с комментарием: {comment}",
-                payload=f"gift_comment_{comment}",
-                provider_token="",
-                currency="XTR",
-                prices=prices,
-                start_parameter="gift_purchase"
-            )
 
 @dp.callback_query(F.data == "donate_menu")
 async def donate_menu(callback: types.CallbackQuery):
@@ -774,12 +711,8 @@ async def successful_payment_handler(message: types.Message):
             await bot.send_message(admin_id, f"💝 Донат: @{user.username or user.first_name} | {amount} ⭐")
     
     else:
-        if "no_comment" in payload:
-            comment = f"Подарок от @{user.username or user.first_name}"
-        else:
-            comment = payload.split("_comment_")[1] if "_comment_" in payload else f"Подарок от @{user.username or user.first_name}"
+        comment = DEFAULT_COMMENT
         
-        bot_info = await bot.get_me()
         success, response = await send_gift_via_api(user.id, GIFT_ID, comment)
         
         if success:
@@ -822,6 +755,7 @@ async def main():
     print(f"💰 Баланс бота: {balance} Stars")
     print(f"🎁 Подарок: {GIFT_NAME}")
     print(f"💰 Цена: {current_price} Stars")
+    print(f"💬 Комментарий: {DEFAULT_COMMENT}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
