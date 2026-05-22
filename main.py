@@ -15,16 +15,11 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 GIFTS = {
-    "ring": {"id": "5170690322832818290", "name": "💍 Кольцо", "emoji": "💍", "price": 15},
-    "diamond": {"id": "5170521118301225164", "name": "💎 Алмаз", "emoji": "💎", "price": 25},
-    "cup": {"id": "5168043875654172773", "name": "🏆 Кубок", "emoji": "🏆", "price": 20},
-    "tree": {"id": "5922558454332916696", "name": "🎄 Новогодняя ёлка", "emoji": "🎄", "price": 18},
-    "rocket": {"id": "5170564780938756245", "name": "🚀 Ракета", "emoji": "🚀", "price": 30},
-    "champagne": {"id": "6028601630662853006", "name": "🍾 Бутылка шампанского", "emoji": "🍾", "price": 20},
-    "cake": {"id": "5170144170496491616", "name": "🎂 Праздничный торт", "emoji": "🎂", "price": 22},
-    "heart": {"id": "5170145012310081615", "name": "💝 Сердце с лентой", "emoji": "💝", "price": 20},
-    "bear": {"id": "5956217000635139069", "name": "🧸 Плюшевый мишка в шапке Санты", "emoji": "🧸", "price": 25}
+    "bear": {"id": "5956217000635139069", "name": "🧸 Плюшевый мишка", "emoji": "🧸"},
+    "heart": {"id": "5170145012310081615", "name": "💝 Сердце с лентой", "emoji": "💝"}
 }
+
+current_price = 15
 
 def init_db():
     conn = sqlite3.connect('gift_bot.db')
@@ -42,9 +37,9 @@ def init_db():
         )
     ''')
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS gift_prices (
-            gift_key TEXT PRIMARY KEY,
-            price INTEGER DEFAULT 15
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value INTEGER
         )
     ''')
     cursor.execute('''
@@ -80,34 +75,33 @@ def init_db():
         )
     ''')
     
-    for gift_key in GIFTS:
-        cursor.execute('INSERT OR IGNORE INTO gift_prices (gift_key, price) VALUES (?, ?)', (gift_key, GIFTS[gift_key]["price"]))
+    cursor.execute('INSERT OR IGNORE INTO settings (key, value) VALUES ("price", 15)')
     
     conn.commit()
     conn.close()
 
 init_db()
 
-def load_gift_prices():
+def load_price():
+    global current_price
     conn = sqlite3.connect('gift_bot.db')
     cursor = conn.cursor()
-    cursor.execute('SELECT gift_key, price FROM gift_prices')
-    results = cursor.fetchall()
+    cursor.execute('SELECT value FROM settings WHERE key = "price"')
+    result = cursor.fetchone()
     conn.close()
-    
-    for gift_key, price in results:
-        if gift_key in GIFTS:
-            GIFTS[gift_key]["price"] = price
+    if result:
+        current_price = result[0]
 
-def save_gift_price(gift_key, price):
+def save_price(price):
+    global current_price
+    current_price = price
     conn = sqlite3.connect('gift_bot.db')
     cursor = conn.cursor()
-    cursor.execute('UPDATE gift_prices SET price = ? WHERE gift_key = ?', (price, gift_key))
+    cursor.execute('UPDATE settings SET value = ? WHERE key = "price"', (price,))
     conn.commit()
     conn.close()
-    GIFTS[gift_key]["price"] = price
 
-load_gift_prices()
+load_price()
 
 def add_user(user_id, username, first_name):
     conn = sqlite3.connect('gift_bot.db')
@@ -293,18 +287,12 @@ async def get_bot_stars_balance():
             return 0
 
 def get_gifts_keyboard():
-    keyboard = []
-    row = []
-    for i, (key, gift) in enumerate(GIFTS.items(), 1):
-        row.append(InlineKeyboardButton(text=f"{gift['emoji']} {gift['price']}⭐", callback_data=f"gift_{key}"))
-        if i % 2 == 0:
-            keyboard.append(row)
-            row = []
-    if row:
-        keyboard.append(row)
-    keyboard.append([InlineKeyboardButton(text="💝 ПОДДЕРЖАТЬ", callback_data="donate_menu")])
-    keyboard.append([InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_main")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧸 ПЛЮШЕВЫЙ МИШКА", callback_data="gift_bear")],
+        [InlineKeyboardButton(text="💝 СЕРДЦЕ С ЛЕНТОЙ", callback_data="gift_heart")],
+        [InlineKeyboardButton(text="💝 ПОДДЕРЖАТЬ", callback_data="donate_menu")],
+        [InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_main")]
+    ])
 
 def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -330,7 +318,7 @@ def get_donate_keyboard():
 
 def get_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 УСТАНОВИТЬ ЦЕНЫ", callback_data="set_prices_menu")],
+        [InlineKeyboardButton(text="💰 УСТАНОВИТЬ ЦЕНУ", callback_data="set_price_menu")],
         [InlineKeyboardButton(text="📊 СТАТИСТИКА", callback_data="stats")],
         [InlineKeyboardButton(text="🎫 СОЗДАТЬ ЧЕК", callback_data="create_check_menu")],
         [InlineKeyboardButton(text="📢 РАССЫЛКА", callback_data="broadcast")],
@@ -338,14 +326,7 @@ def get_admin_keyboard():
         [InlineKeyboardButton(text="◀️ НАЗАД", callback_data="back_to_main")]
     ])
 
-def get_price_edit_keyboard():
-    keyboard = []
-    for key, gift in GIFTS.items():
-        keyboard.append([InlineKeyboardButton(text=f"{gift['emoji']} {gift['name']} — {gift['price']}⭐", callback_data=f"edit_price_{key}")])
-    keyboard.append([InlineKeyboardButton(text="◀️ НАЗАД", callback_data="admin_panel")])
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-def get_comment_keyboard(gift_key: str, gift_name: str, price: int):
+def get_comment_keyboard(gift_key: str, gift_name: str):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 ДОБАВИТЬ КОММЕНТАРИЙ (+3⭐)", callback_data=f"comment_{gift_key}")],
         [InlineKeyboardButton(text="⏩ БЕЗ КОММЕНТАРИЯ", callback_data=f"no_comment_{gift_key}")],
@@ -360,14 +341,10 @@ async def start_cmd(message: types.Message):
     text = (
         "✨ **ПОДАРКИ ЗА TELEGRAM STARS** ✨\n\n"
         "Добро пожаловать в магазин реальных подарков для профиля Telegram!\n\n"
-        "🎁 **Доступные подарки:**\n"
-    )
-    
-    for gift in GIFTS.values():
-        text += f"  {gift['emoji']} {gift['name']} — {gift['price']}⭐\n"
-    
-    text += (
-        f"\n💬 **Комментарий к подарку:**\n"
+        f"🎁 **Доступные подарки:**\n"
+        f"  🧸 Плюшевый мишка — {current_price}⭐\n"
+        f"  💝 Сердце с лентой — {current_price}⭐\n\n"
+        f"💬 **Комментарий к подарку:**\n"
         f"   • Без комментария: @{user.username or user.first_name}\n"
         f"   • С комментарием: +3 Stars\n\n"
         "🎁 **Выберите подарок в меню ниже**"
@@ -382,24 +359,14 @@ async def back_to_main(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=get_main_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
-@dp.callback_query(F.data == "admin_panel")
-async def admin_panel_back(callback: types.CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔ Доступ запрещён!", show_alert=True)
-        return
-    await callback.message.edit_text(
-        "👑 **АДМИН ПАНЕЛЬ**\n\nВыберите действие:",
-        reply_markup=get_admin_keyboard(),
-        parse_mode=ParseMode.MARKDOWN
-    )
-    await callback.answer()
-
 @dp.callback_query(F.data == "gifts_menu")
 async def gifts_menu(callback: types.CallbackQuery):
-    text = "🎁 **ВЫБЕРИТЕ ПОДАРОК**\n\n"
-    for gift in GIFTS.values():
-        text += f"{gift['emoji']} {gift['name']} — {gift['price']}⭐\n"
-    text += f"\n💬 Комментарий: +3 Stars"
+    text = (
+        "🎁 **ВЫБЕРИТЕ ПОДАРОК**\n\n"
+        f"🧸 Плюшевый мишка — {current_price}⭐\n"
+        f"💝 Сердце с лентой — {current_price}⭐\n\n"
+        f"💬 Комментарий: +3 Stars"
+    )
     
     await callback.message.edit_text(text, reply_markup=get_gifts_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
@@ -415,14 +382,14 @@ async def select_gift(callback: types.CallbackQuery):
     
     text = (
         f"{gift['emoji']} **{gift['name']}**\n\n"
-        f"💰 **Цена:** {gift['price']} Stars\n"
+        f"💰 **Цена:** {current_price} Stars\n"
         f"💬 **Комментарий:**\n"
         f"   • Без комментария — @{callback.from_user.username or callback.from_user.first_name}\n"
-        f"   • С комментарием — +3 Stars ({gift['price'] + 3} Stars)\n\n"
+        f"   • С комментарием — +3 Stars ({current_price + 3} Stars)\n\n"
         f"Выберите вариант:"
     )
     
-    await callback.message.edit_text(text, reply_markup=get_comment_keyboard(gift_key, gift['name'], gift['price']), parse_mode=ParseMode.MARKDOWN)
+    await callback.message.edit_text(text, reply_markup=get_comment_keyboard(gift_key, gift['name']), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("comment_"))
@@ -438,7 +405,7 @@ async def with_comment(callback: types.CallbackQuery):
     await callback.message.edit_text(
         f"📝 **ВВЕДИТЕ КОММЕНТАРИЙ**\n\n"
         f"Подарок: {gift['emoji']} {gift['name']}\n"
-        f"💰 Цена с комментарием: {gift['price'] + 3} Stars\n\n"
+        f"💰 Цена с комментарием: {current_price + 3} Stars\n\n"
         f"Отправьте текстовое сообщение — это будет подпись к подарку.\n"
         f"Максимум 100 символов."
     )
@@ -454,7 +421,6 @@ async def without_comment(callback: types.CallbackQuery):
     gift_key = callback.data.replace("no_comment_", "")
     gift = GIFTS.get(gift_key)
     user = callback.from_user
-    bot_info = await bot.get_me()
     
     if not gift:
         await callback.answer("Подарок не найден")
@@ -462,7 +428,7 @@ async def without_comment(callback: types.CallbackQuery):
     
     comment = f"Подарок от @{user.username or user.first_name}"
     
-    prices = [LabeledPrice(label=f"{gift['emoji']} {gift['name']}", amount=gift['price'])]
+    prices = [LabeledPrice(label=f"{gift['emoji']} {gift['name']}", amount=current_price)]
     
     await bot.send_invoice(
         chat_id=user.id,
@@ -492,7 +458,7 @@ async def handle_comment_input(message: types.Message):
             await dp.fsm.storage.set_state(user.id, None)
             
             if gift:
-                prices = [LabeledPrice(label=f"{gift['emoji']} {gift['name']} + комментарий", amount=gift['price'] + 3)]
+                prices = [LabeledPrice(label=f"{gift['emoji']} {gift['name']} + комментарий", amount=current_price + 3)]
                 
                 await bot.send_invoice(
                     chat_id=user.id,
@@ -551,7 +517,14 @@ async def top_donors_callback(callback: types.CallbackQuery):
         text = "🏆 **ТОП ДОНАТЕРОВ**\n\n"
         for i, (user_id, username, first_name, total) in enumerate(donors, 1):
             name = f"@{username}" if username else first_name
-            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
+            if i == 1:
+                medal = "🥇"
+            elif i == 2:
+                medal = "🥈"
+            elif i == 3:
+                medal = "🥉"
+            else:
+                medal = f"{i}."
             text += f"{medal} {name} — {total} ⭐\n"
     
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -675,67 +648,42 @@ async def admin_panel(message: types.Message):
         parse_mode=ParseMode.MARKDOWN
     )
 
-@dp.callback_query(F.data == "set_prices_menu")
-async def set_prices_menu(callback: types.CallbackQuery):
+@dp.callback_query(F.data == "set_price_menu")
+async def set_price_menu(callback: types.CallbackQuery):
     if callback.from_user.id not in ADMIN_IDS:
         await callback.answer("⛔ Доступ запрещён!", show_alert=True)
-        return
-    
-    text = "💰 **УСТАНОВКА ЦЕН НА ПОДАРКИ**\n\nВыберите подарок для изменения цены:"
-    await callback.message.edit_text(text, reply_markup=get_price_edit_keyboard(), parse_mode=ParseMode.MARKDOWN)
-    await callback.answer()
-
-@dp.callback_query(F.data.startswith("edit_price_"))
-async def edit_price_callback(callback: types.CallbackQuery):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("⛔ Доступ запрещён!", show_alert=True)
-        return
-    
-    gift_key = callback.data.replace("edit_price_", "")
-    gift = GIFTS.get(gift_key)
-    
-    if not gift:
-        await callback.answer("Подарок не найден")
         return
     
     await callback.message.edit_text(
-        f"💰 **ИЗМЕНЕНИЕ ЦЕНЫ**\n\n"
-        f"{gift['emoji']} {gift['name']}\n"
-        f"Текущая цена: {gift['price']} Stars\n\n"
+        f"💰 **УСТАНОВКА ЦЕНЫ**\n\n"
+        f"Текущая цена: {current_price} Stars\n\n"
         f"Введите новую цену командой:\n"
-        f"`/set_gift_price {gift_key} <цена>`\n\n"
-        f"Пример: `/set_gift_price {gift_key} 20`",
-        reply_markup=get_price_edit_keyboard(),
+        f"`/set_price <число>`\n\n"
+        f"Пример: `/set_price 20`",
+        reply_markup=get_admin_keyboard(),
         parse_mode=ParseMode.MARKDOWN
     )
     await callback.answer()
 
-@dp.message(Command("set_gift_price"))
-async def set_gift_price_cmd(message: types.Message):
+@dp.message(Command("set_price"))
+async def set_price_cmd(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("⛔ ДОСТУП ЗАПРЕЩЁН!")
         return
     
-    args = message.text.split()
-    if len(args) != 3 or not args[2].isdigit():
-        await message.answer("❌ Используйте: `/set_gift_price <ключ_подарка> <цена>`\n\nДоступные ключи:\n" + 
-                           "\n".join([f"• {key} — {gift['name']}" for key, gift in GIFTS.items()]), 
-                           parse_mode=ParseMode.MARKDOWN)
-        return
-    
-    gift_key = args[1]
-    new_price = int(args[2])
-    
-    if gift_key not in GIFTS:
-        await message.answer(f"❌ Подарок с ключом '{gift_key}' не найден!")
-        return
-    
-    if new_price < 1:
-        await message.answer("❌ Цена должна быть больше 0!")
-        return
-    
-    save_gift_price(gift_key, new_price)
-    await message.answer(f"✅ Цена на {GIFTS[gift_key]['emoji']} {GIFTS[gift_key]['name']} установлена: {new_price} Stars")
+    try:
+        args = message.text.split()
+        if len(args) != 2:
+            await message.answer("❌ Используйте: /set_price <число>")
+            return
+        new_price = int(args[1])
+        if new_price < 1:
+            await message.answer("❌ Цена должна быть больше 0!")
+            return
+        save_price(new_price)
+        await message.answer(f"✅ Цена установлена: {new_price} Stars для всех подарков!")
+    except ValueError:
+        await message.answer("❌ Введите число!")
 
 @dp.callback_query(F.data == "stats")
 async def stats_callback(callback: types.CallbackQuery):
@@ -752,12 +700,9 @@ async def stats_callback(callback: types.CallbackQuery):
         f"⭐ **Потрачено Stars:** {total_stars}\n"
         f"🎁 **Куплено подарков:** {total_gifts}\n"
         f"💝 **Собрано донатов:** {total_donated} ⭐\n"
-        f"🤖 **Баланс бота:** {bot_balance} Stars\n\n"
-        f"💰 **Текущие цены:**\n"
+        f"🤖 **Баланс бота:** {bot_balance} Stars\n"
+        f"💰 **Текущая цена:** {current_price} Stars"
     )
-    
-    for gift in GIFTS.values():
-        text += f"  {gift['emoji']} {gift['name']} — {gift['price']}⭐\n"
     
     await callback.message.edit_text(text, reply_markup=get_admin_keyboard(), parse_mode=ParseMode.MARKDOWN)
     await callback.answer()
@@ -1034,10 +979,8 @@ async def main():
     balance = await get_bot_stars_balance()
     print("🚀 БОТ ЗАПУЩЕН!")
     print(f"💰 Баланс бота: {balance} Stars")
-    print(f"🎁 Доступно подарков: {len(GIFTS)}")
-    print("\n💰 Текущие цены:")
-    for gift in GIFTS.values():
-        print(f"  {gift['emoji']} {gift['name']} — {gift['price']}⭐")
+    print(f"🎁 Доступно подарков: 2 (Мишка и Сердце)")
+    print(f"💰 Текущая цена: {current_price} Stars для всех подарков")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
